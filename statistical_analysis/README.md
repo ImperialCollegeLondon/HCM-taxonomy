@@ -21,4 +21,4 @@ The procedure is then similar to permFL.R function from the package [mutools3D](
 
 ## [data](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/statistical_analysis/data)
 
-Consists of the data used in the [Massunivaraiteanalysis_UKBB]().
+Consists of the data used in the [Mass_univaraite_analysis_UKBB](https://github.com/ImperialCollegeLondon/HCM_expressivity/blob/master/statistical_analysis/Mass_univariate_analysis_UKBB.R).
