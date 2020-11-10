@@ -25,7 +25,7 @@ murq <- function(X, Y, extract){
 
   dofC <- nrow(X) - ncol(X)
 
-  #QR transformation
+  #QR decomposition of X matrix into an orthogonal matrix and a triangular matrix
   QR <- qr(X)
   for(y in 1:nPoints){
     #do the regression for all the vertexes of the atlas
