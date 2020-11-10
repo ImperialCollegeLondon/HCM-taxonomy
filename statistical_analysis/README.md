@@ -13,5 +13,5 @@ This function first computes the nuisance matrix (Z) and the residual-forming ma
 The procedure is then similar to permFL.R function from the package [mutools3D](https://github.com/UK-Digital-Heart-Project/mutools3D).
 * TFCE and mur are also used from the package [mutools3D](https://github.com/UK-Digital-Heart-Project/mutools3D).
 
-## [Data](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/3D_regression_analysis)
+## [data](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/3D_regression_analysis/data)
 
