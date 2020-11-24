@@ -1,7 +1,7 @@
 
 # Mass Univariate Analysis 
 
-A 3D modelling of genotype-phenotype relationship.  
+A 3D modelling of genotype-phenotype relationships.  
 
 ## [functions](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/statistical_analysis/functions)
 
@@ -22,3 +22,6 @@ The procedure is then similar to permFL.R function from the package [mutools3D](
 ## [data](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/statistical_analysis/data)
 
 Consists of the data used in the [Mass_univaraite_analysis_UKBB](https://github.com/ImperialCollegeLondon/HCM_expressivity/blob/master/statistical_analysis/Mass_univariate_analysis_UKBB.R).
+
+
+The code has been fully documented and descriptions are available from within.
