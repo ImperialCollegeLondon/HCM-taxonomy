@@ -24,7 +24,10 @@ murq <- function(X, Y, extract){
   #beta and p obtained at each point
 
   dofC <- nrow(X) - ncol(X)
-
+  
+  xTxInv <- solve(t(X) %*% X)
+  #(tX X)^-1
+  
   #QR decomposition of X matrix into an orthogonal matrix and a triangular matrix
   QR <- qr(X)
   for(y in 1:nPoints){

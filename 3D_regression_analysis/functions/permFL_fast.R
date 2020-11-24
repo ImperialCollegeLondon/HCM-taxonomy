@@ -8,6 +8,8 @@ permFL_fast<-function(X, Y, extract, A, NNmatrix, nPermutations, E=0.5, H=2, fun
   library(igraph)
   require(multtest)
   library(Rcpp)
+  library(plyr)
+  library(float)
   
   sourceCpp(paste(func_dir,"functions/multiply.cpp",sep=""))
   # include a cpp functions for faster multiplication of matrices!
@@ -30,7 +32,6 @@ permFL_fast<-function(X, Y, extract, A, NNmatrix, nPermutations, E=0.5, H=2, fun
   Ypr<-eigenMapMatMult(Zpinv,Y) # faster multiplication!
   Yp<-Y-Ypr
   
-  library(float)
   Rz<-fl(Yp) # float for precision matrix
   
   #parallelization for iF=1:10 in a loop
@@ -53,7 +54,6 @@ permFL_fast<-function(X, Y, extract, A, NNmatrix, nPermutations, E=0.5, H=2, fun
     
   }
   
-  library(plyr)
   resP<-ldply(permresP,rbind)
   #for each element of a list, apply function then combine results into the resP data frame
   closeAllConnections()
