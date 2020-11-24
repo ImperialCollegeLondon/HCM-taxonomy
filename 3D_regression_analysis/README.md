@@ -3,7 +3,7 @@
 
 A 3D computational modelling of left ventricular geometry in the UK Biobank participants with whole exome sequencing. The output models represent the surface of the
 left ventricle on which standardised beta coefficients are calculated and mapped to show the strength of associations between genotype status and wall thickness
-adjusted for age, gender, race, body surface area and systolic blood pressure. The models can be plotted with [3D_plot](https://github.com/ImperialCollegeLondon/HCM_expressivity/blob/master/3D_regression_analysis/Mass_univariate_analysis_UKBB.R).  
+adjusted for age, gender, race, body surface area and systolic blood pressure. The models can be plotted with [3D_plot](https://github.com/ImperialCollegeLondon/HCM_expressivity/blob/master/3D_regression_analysis/3D_plot.R).  
 
 ## [functions](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/3D_regression_analysis/functions)
 
