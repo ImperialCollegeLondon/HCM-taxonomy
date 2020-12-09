@@ -1,0 +1,1056 @@
+## README      
+
+where "### !Manual assessment required" is flagged, pause the analysis and follow guidelines for e.g. reading literature.       
+   
+## Set Up and VEP  
+
+PLINK binary bed, fam, bim files downloaded from 200,000 UK Biobank exome dataset and variants in the region (+/- 100bp) of genes of interest extracted into bfiles and a VCF file [ukbexomehcm.*]. For the same data, the frequency (--freq) and missingness information (--missing) were obtained via PLINK for the variants. A "metadata table" was created of ID's from the fam file and summary information (ukbbMetaData.txt).     
+
+Run VCF by VEP (version 99) for the following parameters:   
+```{bash}
+--symbol \
+--canonical \
+--mane \
+--hgvs \
+--custom clinvar_20201026.vcf.gz,ClinVar,vcf,exact,0,CLNSIG,CLNREVSTAT,CLNDN \
+--custom gnomAD/r2.1.1_liftover38/exomes/gnomad.exomes.r2.1.1.sites.liftover_grch38.vcf.gz,gnomADg,vcf,exact,0,AF_afr,AF_amr,AF_asj,AF_eas,AF_fin,AF_nfe,AF_sas,AF_oth,AC,AC_popmax,AN,AN_popmax,AF,AF_popmax,popmax,faf95,faf95_nfe,faf95_afr,faf95_amr,faf95_eas,faf95_sas \
+--plugin dbscSNV,dbscSNV1.1_GRCh38.txt.gz \
+--plugin MaxEntScan \
+--dir_plugins loftee/ \
+--plugin LoF,\
+loftee_path:loftee,\
+human_ancestor_fa:human_ancestor.fa.gz,\
+conservation_file:loftee.sql,\
+gerp_bigwig:gerp_conservation_scores.homo_sapiens.GRCh38.bw \
+--output_file ukb200exomehcmvepresults
+```
+
+## Packages    
+
+```{r}
+library('data.table')
+library('plyr')
+library('tidyr')
+library('dplyr')
+library('expss')
+library('ggpubr')
+```
+
+## Data Load
+
+```{r files to load in, include=FALSE}
+vars <- fread("ukb200exomehcmvepresults", header=T, sep="\t")
+vars <- data.frame(vars)
+
+#count of missing (unmeasured) per variant in 50k
+miss <- fread("ukb200exomehcmvepresults.lmiss", header=T)
+miss <- data.frame(miss)
+colnames(miss)[2] <- ("ID")
+
+#minor allele frequency of the variants
+freq <- fread("ukb200exomehcmvepresults.frq", header=T)
+freq <- data.frame(freq)
+colnames(freq)[2] <- ("ID")
+
+bim <- fread("ukb200exomehcmvepresults.bim", header=F)
+bim <- data.frame(bim)
+colnames(bim) <- c("CHROM", "ID", "X", "POS", "ALT", "REF")
+
+meta <- read.table("ukbbMetaData.txt", header=T)
+
+fam <- fread("ukb200exomehcm.fam", header=F)
+fam <- data.frame(fam)
+```
+
+## Identify protein altering variants   
+
+Variants with a consequence term defined by the Sequence Ontology with the potential to alter the gene product level or structure:  
+
+**transcript_ablation**	A feature ablation whereby the deleted region includes a transcript feature	HIGH	  
+**splice_acceptor_variant**	A splice variant that changes the 2 base region at the 3' end of an intron	HIGH	  
+**splice_donor_variant**	A splice variant that changes the 2 base region at the 5' end of an intron	HIGH	  
+**stop_gained**	A sequence variant whereby at least one base of a codon is changed, resulting in a premature stop codon, leading to a shortened transcript	HIGH	  
+**frameshift_variant**	A sequence variant which causes a disruption of the translational reading frame, because the number of nucleotides inserted or deleted is not a multiple of three	HIGH	  
+**stop_lost**	A sequence variant where at least one base of the terminator codon (stop) is changed, resulting in an elongated transcript	HIGH	  
+**start_lost**	A codon variant that changes at least one base of the canonical start codon	HIGH	  
+**transcript_amplification**	A feature amplification of a region containing a transcript	HIGH	  
+**inframe_insertion**	An inframe non synonymous variant that inserts bases into in the coding sequence	MODERATE	  
+**inframe_deletion**	An inframe non synonymous variant that deletes bases from the coding sequence	MODERATE	  
+**missense_variant**	A sequence variant, that changes one or more bases, resulting in a different amino acid sequence but where the length is preserved	MODERATE	  
+**protein_altering_variant**	A sequence_variant which is predicted to change the protein encoded in the coding sequence	MODERATE	  
+**regulatory_region_ablation**	A feature ablation whereby the deleted region includes a regulatory region	MODERATE	  
+
+Plus variants with a consequence term requiring further assessment to subset those with the potential to alter the gene product level or structure:
+
+**splice_region_variant**	A sequence variant in which a change has occurred within the region of the splice site, either within 1-3 bases of the exon or 3-8 bases of the intron	LOW	    
+**incomplete_terminal_codon_variant**	A sequence variant where at least one base of the final codon of an incompletely annotated transcript is changed	LOW	    
+**coding_sequence_variant**	A sequence variant that changes the coding sequence	MODIFIER	    
+**start and stop codons** Require additional manual assessment       
+
+```{r filter protein altering}
+PAV_List=c("missense_variant","frameshift_variant","stop_gained","inframe_deletion","splice_donor_variant","splice_acceptor_variant","inframe_insertion","transcript_ablation","stop_lost","start_lost","transcript_amplification","protein_altering_variant", "splice_region_variant", "regulatory_region_ablation", "incomplete_terminal_codon_variant", "coding_sequence_variant")
+
+ttn2 <- vars[grepl(paste(PAV_List, collapse="|"), vars$Consequence),]
+```
+
+## Filter for Genes of interest     
+
+Adapted from Ingles et al., Circ Genom Precis Med. 2019;12:e002460 - ClinGen consortium     
+8 definitive sarcomeric HCM genes = MYH7	MYBPC3	MYL2	MYL3	ACTC1	TNNI3	TNNT2	TPM1       
+3 medium evidence HCM genes = CSRP3 TNNC1 JPH2    
+2 intrinsic cardiomyopathy genes = ACTN2 (moderate) PLN (definitive)      
+14 syndromic genes that can cause isolated LVH = FHL1 TTR	FLNC	GLA	LAMP2	PRKAG2	PTPN11	RAF1	RIT1	ALPK3	MYH7	CACNA1C	DES     
+
+```{r filter genes}
+ttn2 <- ttn2[
+ttn2$SYMBOL == "CSRP3" |
+ttn2$SYMBOL == "PLN"  |
+ttn2$SYMBOL == "TNNC1" |
+ttn2$SYMBOL == "FHL1" |
+ttn2$SYMBOL == "ACTN2"  |
+ttn2$SYMBOL == "JPH2"  |
+ttn2$SYMBOL == "FLNC"  |
+ttn2$SYMBOL == "GLA"  |
+ttn2$SYMBOL == "LAMP2"  |
+ttn2$SYMBOL == "PRKAG2"  |
+ttn2$SYMBOL == "TTR"  |
+ttn2$SYMBOL == "PTPN11"  |
+ttn2$SYMBOL == "RAF1" |
+ttn2$SYMBOL == "RIT1"  |
+ttn2$SYMBOL == "ALPK3" |
+ttn2$SYMBOL == "CACNA1C"  |
+ttn2$SYMBOL == "MYH7"  |
+ttn2$SYMBOL == "DES"  |
+ttn2$SYMBOL == "MYBPC3"  |
+ttn2$SYMBOL == "TNNT2"  |
+ttn2$SYMBOL == "TNNI3"  |
+ttn2$SYMBOL == "TPM1"  |
+ttn2$SYMBOL == "MYL2"  |
+ttn2$SYMBOL == "MYL3" |
+ttn2$SYMBOL == "ACTC1" 
+,]
+```
+
+## Assess canonical transcript only
+
+Assess canonical transcript only: the longest CDS (coding region of gene)       
+MANE was assessed but only covered 16 of the 25 genes of interest.      
+  
+```{r filter canonical and check if all variants ran in VEP}
+ttncan <- ttn2[which(ttn2$CANONICAL == "YES"),]
+```
+
+## Filter for rare variants (<0.1% (or missing) in UKB and gnomAD)     
+
+gnomAD: The Genome Aggregation Database; 125,748 exomes from unrelated individuals sequenced as part of various disease-specific and population genetic studies, totalling 141,456 individuals. Some individuals with severe disease may still be included in the data sets, albeit likely at a frequency equivalent to or lower than that seen in the general population.     
+  
+```{r filter rare}
+colnames(ttncan)[1] <- "ID" #was called #UploadedVariation by VEP
+ttncan <- data.frame(ttncan)
+ttncan2 <- join(ttncan, freq, type="left", by="ID")
+
+#presence of "-" cause columns to not be numeric in R
+ttncan2$gnomADg_faf95_nfe <- as.numeric(ttncan2$gnomADg_faf95_nfe)
+ttncan2$gnomADg_faf95_afr <- as.numeric(ttncan2$gnomADg_faf95_afr)
+ttncan2$gnomADg_faf95_amr <- as.numeric(ttncan2$gnomADg_faf95_amr)
+ttncan2$gnomADg_faf95_eas <- as.numeric(ttncan2$gnomADg_faf95_eas)
+ttncan2$gnomADg_faf95_sas <- as.numeric(ttncan2$gnomADg_faf95_sas)
+
+#create a column for max faf95 from the five populations
+ttncan2$gnomADg_faf95_popmax <- do.call('pmax',c(ttncan2[which( colnames(ttncan2)=="gnomADg_faf95_nfe" ):which( colnames(ttncan2)=="gnomADg_faf95_sas" )],list(na.rm=TRUE)))          
+#if ran VEP as noted, nfe:sas in order
+
+class(ttncan2$MAF)
+#numeric
+#MAF<0.1%
+tmp <- ttncan2[which(ttncan2$MAF < 0.001),]
+
+#gnomAD AF<0.1% or NA
+tmp$gnomADg_AF <- as.numeric(tmp$gnomADg_AF)
+ttncanrare <- tmp[which(tmp$gnomADg_AF < 0.001 | is.na(tmp$gnomADg_AF)),]
+```
+
+## Filter splice region variants    
+### !Manual assessment required        
+
+Identify those that are pathogenic/likely pathogenic for HCM in ClinVar and manually assess the ClinVar report for functional evidence of splice action;     
+If splice acting evidence provided, renamed consequence as "splice_confirmed".    
+If evidence is unclear, left consequence as is, e.g. "missense_variant,splice_region_variant".     
+If evidence of alternative mechanism, renamed consequence without splice_region_variant flag to alternative mechanism only, e.g. "missense_variant".    
+
+Assess the splice predictions of splice_region_variants that are found with another PAV flag,   
+those that may be removed from analysis based on LOF flag but included if predicted to cause splicing:       
+TNNT2 stop gained identified predicted to cause splicing, but is NMD competent so not included in analysis.  
+
+Filter the splice_region_variants that are found with another non-PAV flag (e.g. intron, 3'UTR, 5'UTR, etc.):    
+--> non-PAV-linked splice_region_variants filtered out that don't meet prediction thresholds of MaxEntScan_diff>3, ada_score>0.95, rf_score>0.75.   
+
+```{r splice region}
+#subset splice region variants
+hmm <- ttncanrare[grepl("splice_region_variant", ttncanrare$Consequence),]
+
+#are there any pathogenic for HCM with multiple submitters in ClinVar?
+hmm2 <- hmm[which(hmm$ClinVar_CLNSIG == "Pathogenic" | hmm$ClinVar_CLNSIG == "Pathogenic/Likely_pathogenic" | hmm$ClinVar_CLNSIG == "Likely_pathogenic"),]
+
+#HCM?
+table(hmm2$ClinVar_CLNDN)
+#all HCM
+
+#Check ClinVar evidence strength for multiple submitters      
+data.frame(hmm2$rf_score, hmm2$ada_score, hmm2$MaxEntScan_diff, hmm2$ClinVar, hmm2$SYMBOL, hmm2$Consequence, hmm2$ID)
+
+#"42706" - MYBPC3 intron - confirmed splice disruption [shift in the reading frame, and premature termination of translation in exon 31 (Watkins et al. 1995)] + meets all thresholds - change to splice_confirmed
+ttncanrare$Consequence[ttncanrare$ClinVar == "42706"] <- "splice_confirmed"
+#"155808" - MYBPC3 intron - confirmed splice disruption [ splicing causing exon 29 skipping that results in a truncated protein, skips exon 29 (Rodriguez-Garcia et al., 2010; Crehalet et al., 2012)] + meets all thresholds - change to splice_confirmed
+ttncanrare$Consequence[ttncanrare$ClinVar == "155808"] <- "splice_confirmed"
+#"42556" - MYBPC3 intron - confirmed splice disruption [skips exon 17, leading to the introduction of a premature stop codon (Helms et al. 2014)] + meets all thresholds - change to splice_confirmed
+ttncanrare$Consequence[ttncanrare$ClinVar == "42556"] <- "splice_confirmed"
+#"8608" - MYBPC3 missense - confirmed splice disruption [skips exon 17,  and truncated protein product(Carrier_1997, Marston_2012, Helms_2014)] + meets all thresholds - change to splice_confirmed 
+ttncanrare$Consequence[ttncanrare$ClinVar == "8608"] <- "splice_confirmed"
+#"42792" - MYBPC3 missense - confirmed splice disruption [skips exon 6 , creates a truncated protein product (Sarikas et al., 2005; Helms et al., 2014)] + meets all thresholds - change to splice_confirmed
+ttncanrare$Consequence[ttncanrare$ClinVar == "42792"] <- "splice_confirmed"
+#"42784"  - MYBPC3 missense - has been shown in vitro (Crehalet et al., 2012) to skip exon 6 but another ClinVar report says the invitro assay is not representative + doesn't meet thresholds - leaving as it, will be included in analysis anyway
+#IGNORE
+#"378215" - MYH7 synonymous - confirmed splice disruption [inframe skipping of exon 38,  resulting in a transcript lacking exon 38 (Pajusalu et al., 2016; Fiorillo et al., 2016)] + meets all thresholds - change to splice_confirmed as indels are usually smaller than an entire exon.
+ttncanrare$Consequence[ttncanrare$ClinVar == "378215"] <- "splice_confirmed"
+
+#shorten all other splice_region_variants to those with computational evidence
+ttncanrare$rf_score <- as.numeric(ttncanrare$rf_score)
+ttncanrare$MaxEntScan_diff <- as.numeric(ttncanrare$MaxEntScan_diff)
+ttncanrare$ada_score <- as.numeric(ttncanrare$ada_score)
+
+#first filter for those meeting insilico for splicing
+df <- ttncanrare %>%
+  filter(Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,5_prime_UTR_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant,NMD_transcript_variant" | Consequence == "splice_region_variant,intron_variant,NMD_transcript_variant" | Consequence == "splice_region_variant,intron_variant,non_coding_transcript_variant" | Consequence == "splice_region_variant,non_coding_transcript_exon_variant") %>% 
+  filter(MaxEntScan_diff<3 | ada_score<0.95 | rf_score<0.75) 
+
+ttncanrare$found <- ttncanrare$ID %in% df$ID
+ttncanrare2 <- ttncanrare[which(ttncanrare$found == "FALSE"),]
+ttncanrare2$found <- NULL
+
+#Then filter out those with NAs 
+df <- ttncanrare2 %>%
+  filter(Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,5_prime_UTR_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant,NMD_transcript_variant" | Consequence == "splice_region_variant,intron_variant,NMD_transcript_variant" | Consequence == "splice_region_variant,intron_variant,non_coding_transcript_variant" | Consequence == "splice_region_variant,non_coding_transcript_exon_variant") %>%
+  filter((is.na(rf_score)) | (is.na(MaxEntScan_diff)) | (is.na(ada_score)))
+
+ttncanrare2$found <- ttncanrare2$ID %in% df$ID
+ttncanrare2 <- ttncanrare2[which(ttncanrare2$found == "FALSE"),]
+ttncanrare2$found <- NULL
+
+write.table(ttncanrare2, "step1vars.txt", quote=F, row.names=F, sep="\t")
+```
+
+## Step 1: Find Genotype Negatives        
+
+Identify carriers of rare protein altering variants in any of the 25 genes of interest: too inclusive but identifies clean controls.  
+
+```{r List Variants}
+togo <- data.frame(ttncanrare2$ID)
+write.table(togo, "IDsforextract.txt", quote=F, row.names=F)
+```
+
+```{bash Extract Variants}
+plink --bfile ukb200exomehcm --extract IDsforextract.txt --recode A --output-chr M --out hcmvarsofinterest
+```
+
+```{r Find Carriers}
+jabin <- fread("hcmvarsofinterest.raw", header=T)
+jabin <- data.frame(jabin)
+
+#Sample info always starts on 7th column in this data format
+jabin$ref <- rowSums(jabin[7:ncol(jabin)] == "0", na.rm=T)
+jabin$hets <- rowSums(jabin[7:ncol(jabin)-1] == "1", na.rm=T)
+jabin$homs <- rowSums(jabin[7:ncol(jabin)-2] == "2", na.rm=T)
+jabin$miss <- rowSums(is.na(jabin[7:ncol(jabin)-3]))
+
+#list heterozygotes
+hets <- jabin[which(jabin$hets > 0),]
+hets_2 <- data.frame(hets$FID, hets$hets)
+colnames(hets_2) <- c("eid", "count")
+write.table(hets_2, "step1hets.txt", quote=F, row.names=F)
+
+#list homozygotes
+homs <- jabin[which(jabin$homs > 0),]
+homs_2 <- data.frame(homs$FID)
+colnames(homs_2) <- c("eid")
+write.table(homs_2, "step1homs.txt", quote=F, row.names=F)
+
+#assess variant missingness
+ttncanrare2 <- fread("step1vars.txt", header=T, sep="\t")
+ttncanrare2 <- data.frame(ttncanrare2)
+rarevar <- join(ttncanrare2, miss, type="left", by="ID")
+#which variants missing in greater than 10% population?
+hmm <- rarevar[which(rarevar$N_MISS > (0.1*200643)),]
+data.frame(hmm$ID, hmm$SYMBOL, hmm$Consequence, hmm$N_MISS)
+#1 2:219418555:T:G        DES   missense_variant     199950
+#2 7:128848680:G:C       FLNC   missense_variant      32467
+#3 15:84817498:C:T      ALPK3   missense_variant      21543
+#4 19:55156278:D:1      TNNI3 frameshift_variant      20996
+
+#list genes of heterzygotes
+hets_3 <- data.frame(hets[1], hets[7:(ncol(hets)-4)])
+for(i in (1:nrow(hets_3))){
+    hets_3$var[i] <- paste((colnames(hets_3)[which(hets_3[i,1:(ncol(hets_3)-1)] == 1)]),collapse = ",")
+}
+#slow 
+#column names saved as "X" in R - remove them
+hets_3$var <- gsub("^X", "", hets_3$var)
+#ensure no empty cells (fill with NA (as character) - more useful for homozygotes)
+hets_3$var <- sub("^$", "NA", hets_3$var)
+#get eid and variant ID for each person
+rarvar <- data.frame(hets_3$FID, hets_3$var)
+splitted <- strsplit(as.character(rarvar$hets_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$hets_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+#column names saved as "X" in R - remove them
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+#column names saved ":" as "." in R - change back
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+#remove any duplicates
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+#remove any NAs
+rarvar2 <- delete.na(rarvar2)
+#List of eid and variant ID
+write.table(rarvar2,"step1IDvar.txt", quote=F, row.names=F, sep="\t")
+ttncanrare2$var <- paste0(ttncanrare2$ID, "_",ttncanrare2$A1)
+gene <- data.frame(ttncanrare2$var, ttncanrare2$SYMBOL)
+colnames(gene) <- c("var", "SYMBOL")
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshets_HCMstep1.txt", quote=F, row.names=F)
+
+#list genes of homozygotes
+homs_3 <- data.frame(homs[1], homs[7:(ncol(hets)-4)])
+for(i in (1:nrow(homs_3))){
+    homs_3$var[i] <- paste((colnames(homs_3)[which(homs_3[i,1:(ncol(homs_3)-1)] == 2)]),collapse = ",")
+}
+homs_3$var <- gsub("^X", "", homs_3$var)
+homs_3$var <- sub("^$", NA, homs_3$var)
+homs_3$var[is.na(homs_3$var)] <- "NA"
+rarvar <- data.frame(homs_3$FID, homs_3$var)
+splitted <- strsplit(as.character(rarvar$homs_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$homs_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+rarvar2 <- delete.na(rarvar2)
+write.table(rarvar2,"step1IDvar_homs.txt", quote=F, row.names=F, sep="\t")
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshoms_HCMstep1.txt", quote=F, row.names=F)
+```
+
+## Step 2A:  
+### !Manual assessment required        
+
+Identify carriers of gene-specific consequences of the 8 sarcomeric genes:     
+ 
+#### A - Potential "LoF" alleles:   
+    stop_gained     
+    splice_acceptor_variant
+    splice_donor_variant  
+    frameshift_variant     
+    splice_confirmed        
+    splice_region_variant (with additional insilico evidence)      
+    start_lost (with addition sequence evidence)     
+    ==> use group (i) as LoF, (ii) as PAV.    
+    ==> remove group (iii).    
+    ==> assess group (iv).    
+    
+#### B - Altered protein:   
+    missense_variant     
+    inframe_insertion   
+    inframe_deletion   
+    stop_lost  (with addition sequence evidence)      
+    start_lost  (with addition sequence evidence)     
+    Any of the LoF variant classes if predicted to escape NMD by LOFTEE, flag as "NMDi".      
+    ==> use group (ii).       
+    ==> remove group (i).    
+    ==> assess group (iii) and (iv).    
+
+##### 3 bins from LOFTEE:    
+(i) introduces a PTC, and predicted to lead to NMD (= HC LOFTEE but not NMD incompetent).    
+(ii) introduces a PTC, but predicted to escape NMD (= positional annotation, and/or the equivalent LOFTEE HC flag).   
+(iii) those likely mis-annotated, or not in a relevant exon, so no PTC introduced.   
+(iv) those flagged as "low confidence (LC)" with other LOFTEE flags e.g. NAGNAG.   
+
+#### Extra - For manual curation to group A/B:
+Other potential NMD incompetent by position (in last to 55bp into penultimate exon) and not identified by LOFTEE, also flag as "NMDi".     
+
+#### Final filter based on consequence terms identified
+A_List=c("frameshift_variant", "frameshift_variant,start_lost", "splice_donor_variant", "splice_acceptor_variant", "splice_confirmed", "splice_donor_variant,coding_sequence_variant", "splice_region_variant,intron_variant", "splice_region_variant,synonymous_variant",  "stop_gained", "stop_gained,frameshift_variant", "stop_gained,splice_region_variant","frameshift_variant_NMDi","splice_acceptor_variant_NMDi","splice_donor_variant_NMDi","splice_donor_variant_NMDi,coding_sequence_variant","splice_donor_variant,intron_variant","splice_region_variant_NMDi,intron_variant","splice_region_variant_NMDi,synonymous_variant","stop_gained_NMDi", "splice_donor_variant,intron_variant")       
+        
+B_List=c("missense_variant", "missense_variant,splice_region_variant", "inframe_deletion", "inframe_insertion", "start_lost", "start_lost,splice_region_variant", "stop_lost", "splice_acceptor_variant_NMDi", "splice_donor_variant_NMDi", "splice_donor_variant_NMDi,coding_sequence_variant", "splice_region_variant_NMDi,intron_variant", "frameshift_variant_NMDi", "stop_gained_NMDi", "splice_region_variant_NMDi,synonymous_variant")        
+
+MYH7 | B_List.   
+MYBPC3 | A_List + B_List.  
+TNNT2 | B_List.     
+TNNI3 | B_List.   
+TPM1 | B_List.    
+MYL2 | B_List.  
+MYL3 | B_List.  
+ACTC1 | B_List.   
+
+```{r ant8 - Step 2a}
+#read in variants from step before
+ttncanrare2 <- fread("step1vars.txt")
+ttncanrare2 <- data.frame(ttncanrare2)
+
+#add bim file to get more variant info like position (POS)
+doneant <- join(ttncanrare2, bim, type="left", by="ID")
+
+doneant <- doneant[
+doneant$SYMBOL == "MYH7" |
+doneant$SYMBOL == "MYBPC3"|
+doneant$SYMBOL == "TNNT2"  |
+doneant$SYMBOL == "TNNI3" |
+doneant$SYMBOL == "TPM1" |
+doneant$SYMBOL == "MYL2" |
+doneant$SYMBOL == "MYL3" |
+doneant$SYMBOL == "ACTC1" ,
+]
+
+#What variants does LOFTEE pick up, are they NMD incompetent?
+table(doneant$LoF_filter, doneant$SYMBOL)
+table(doneant$LoF_flags, doneant$SYMBOL)
+#1 MYL3 3'UTR SPLICE
+#1 MYBPC3 NAGNAG SITE
+doneant$Consequence[doneant$LoF_flags == "NAGNAG_SITE"] <- "inframe_insertion"
+doneant$Consequence[doneant$LoF_filter == "3UTR_SPLICE"] <- "splice_donor_variant_LC"
+#1 NAGNAG site = splice acceptor site rescued by inframe acceptor site (low confidence)
+#3'UTR SPLICE = splice donor with pLof low confidence
+
+#What LOF variants does LOFTEE miss that could be positionally NMD incompetent?
+hmm <- doneant %>%
+  filter(SYMBOL == "MYH7") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#MYH7 <	23,413,759 + 55
+hmm2 <- hmm[which(hmm$POS < 23413814),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+doneant$Consequence[doneant$ID == "14:23412872:C:A" & doneant$SYMBOL == "MYH7"] <- "splice_acceptor_variant_NMDi"
+doneant$Consequence[doneant$ID == "14:23413757:A:G" & doneant$SYMBOL == "MYH7"] <- "splice_donor_variant_NMDi"
+doneant$Consequence[doneant$ID == "14:23413759:C:T" & doneant$SYMBOL == "MYH7"] <- "splice_region_variant_NMDi,synonymous_variant"
+
+hmm <- doneant %>%
+  filter(SYMBOL == "MYBPC3") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#MYBPC3 <	47,332,072 + 55
+hmm2 <- hmm[which(hmm$POS < 47332127),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+doneant$Consequence[doneant$ID == "11:47332075:G:A" & doneant$SYMBOL == "MYBPC3"] <- "stop_gained_NMDi"
+
+hmm <- doneant %>%
+  filter(SYMBOL == "TNNT2") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#TNNT2 < 201,359,623 + 55
+hmm2 <- hmm[which(hmm$POS < 201359678),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+doneant$Consequence[doneant$ID == "1:201359258:G:T" & doneant$SYMBOL == "TNNT2"] <- "splice_region_variant_NMDi,intron_variant"
+doneant$Consequence[doneant$ID == "1:201359217:C:T" & doneant$SYMBOL == "TNNT2"] <- "stop_gained_NMDi"
+doneant$Consequence[doneant$ID == "1:201359651:G:A" & doneant$SYMBOL == "TNNT2"] <- "stop_gained_NMDi"
+doneant$Consequence[doneant$ID == "1:201359665:T:G" & doneant$SYMBOL == "TNNT2"] <- "splice_acceptor_variant_NMDi"
+
+hmm <- doneant %>%
+  filter(SYMBOL == "TNNI3") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#TNNI3 < 	55,154,030 + 55
+hmm2 <- hmm[which(hmm$POS < 55154085),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+doneant$Consequence[doneant$ID == "19:55154026:T:A" & doneant$SYMBOL == "TNNI3"] <- "splice_region_variant_NMDi,intron_variant"
+
+hmm <- doneant %>%
+  filter(SYMBOL == "TPM1") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#TPM1 > 63,062,645 - 55 (other direction)
+hmm2 <- hmm[which(hmm$POS > 63062590),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+#none - one exon only
+
+hmm <- doneant %>%
+  filter(SYMBOL == "MYL2") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#MYL2 < 110,913,096 + 55
+hmm2 <- hmm[which(hmm$POS < 110913151),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+doneant$Consequence[doneant$ID == "12:110911146:D:1" & doneant$SYMBOL == "MYL2"] <- "frameshift_variant_NMDi"
+doneant$Consequence[doneant$ID == "12:110911176:C:G" & doneant$SYMBOL == "MYL2"] <- "splice_acceptor_variant_NMDi"
+doneant$Consequence[doneant$ID == "12:110911176:C:T" & doneant$SYMBOL == "MYL2"] <- "splice_acceptor_variant_NMDi"
+doneant$Consequence[doneant$ID == "12:110913094:D:3" & doneant$SYMBOL == "MYL2"] <- "splice_donor_variant_NMDi,coding_sequence_variant"
+doneant$Consequence[doneant$ID == "12:110913095:C:A" & doneant$SYMBOL == "MYL2"] <- "splice_donor_variant_NMDi"
+
+hmm <- doneant %>%
+  filter(SYMBOL == "MYL3") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#MYL3 <	46,858,244 + 55
+hmm2 <- hmm[which(hmm$POS < 46858299),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+doneant$Consequence[doneant$ID == "3:46858231:C:T" & doneant$SYMBOL == "MYL3"] <- "splice_region_variant_NMDi,3_prime_UTR_variant"
+
+hmm <- doneant %>%
+  filter(SYMBOL == "ACTC1") %>%
+  filter(Consequence == "frameshift_variant" | Consequence == "frameshift_variant,start_lost" | Consequence == "splice_acceptor_variant" | Consequence == "splice_confirmed" | Consequence == "splice_donor_variant" | Consequence == "splice_donor_variant,coding_sequence_variant" | Consequence == "splice_donor_variant,intron_variant" | Consequence == "splice_region_variant,3_prime_UTR_variant" | Consequence == "splice_region_variant,intron_variant" | Consequence == "splice_region_variant,synonymous_variant" | Consequence == "start_lost" | Consequence == "start_lost,splice_region_variant" | Consequence == "stop_gained" | Consequence == "stop_gained,frameshift_variant" | Consequence == "stop_gained,splice_region_variant")
+
+#ACTC1 < 	34,791,114 + 55
+hmm2 <- hmm[which(hmm$POS < 34791169),]
+data.frame(hmm2$ID, hmm2$Consequence, hmm2$POS)
+
+doneant$Consequence[doneant$ID == "15:34790493:D:2" & doneant$SYMBOL == "ACTC1"] <- "frameshift_variant_NMDi"
+
+#Assess presence of protein altering variants?
+hmm <- doneant %>%
+  filter(Consequence == "protein_altering_variant")
+#none found
+
+#Assess presence of coding_sequence_variant?
+hmm <- doneant %>%
+  filter(Consequence == "coding_sequence_variant")
+#none found
+
+#Manually assess the ensembl sequence for start and stop codons in each gene for another inframe start/stop nearby (before or after variant)
+#In summary for the variants seen:
+#Start codons cause indels for MYBPC3 (x3), MYH7, TPM1 (x2), MYL2 (x2), TNNT2, and truncations for ACTC1 and MYL3 (these two will be excluded from our HCM pipeline).
+#Stop codons cause inframe insertion for MYH7 and TNNI3.
+
+A_List=c("frameshift_variant", "frameshift_variant,start_lost", "splice_donor_variant", "splice_acceptor_variant", "splice_confirmed", "splice_donor_variant,coding_sequence_variant", "splice_region_variant,intron_variant", "splice_region_variant,synonymous_variant",  "stop_gained", "stop_gained,frameshift_variant", "stop_gained,splice_region_variant","frameshift_variant_NMDi","splice_acceptor_variant_NMDi","splice_donor_variant_NMDi","splice_donor_variant_NMDi,coding_sequence_variant","splice_donor_variant,intron_variant","splice_region_variant_NMDi,intron_variant","splice_region_variant_NMDi,synonymous_variant","stop_gained_NMDi", "splice_donor_variant,intron_variant","missense_variant,splice_region_variant")
+
+B_List=c("missense_variant", "missense_variant,splice_region_variant", "inframe_deletion", "inframe_insertion", "start_lost", "start_lost,splice_region_variant", "stop_lost", "splice_acceptor_variant_NMDi", "splice_donor_variant_NMDi", "splice_donor_variant_NMDi,coding_sequence_variant", "splice_region_variant_NMDi,intron_variant", "frameshift_variant_NMDi", "stop_gained_NMDi", "splice_region_variant_NMDi,synonymous_variant")
+
+doneant8 <- doneant[
+doneant$SYMBOL == "MYH7" & grepl(paste(B_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "MYBPC3" & grepl(paste(A_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "MYBPC3" & grepl(paste(B_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "TNNT2" & grepl(paste(B_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "TNNI3" & grepl(paste(B_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "TPM1" & grepl(paste(B_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "MYL2" & grepl(paste(B_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "MYL3" & grepl(paste(B_List, collapse="|"), doneant$Consequence) |
+doneant$SYMBOL == "ACTC1" & grepl(paste(B_List, collapse="|"), doneant$Consequence),
+]  
+
+dim(doneant8)
+#1786
+
+### !Manual Assessment
+#Ensure removal of:
+#splice_region_variant_NMDi,3_prime_UTR_variant
+#start_lost in ACTC1 and MYL3
+#splice_donor_variant_LC 
+
+write.table(doneant8, "step2Avars.txt", quote=F, row.names=F, sep="\t")
+
+togo <- data.frame(doneant8$ID)
+write.table(togo, "IDsforextract_2A.txt", quote=F, row.names=F, col.names=F)
+```
+
+```{bash}
+plink --bfile ukb200exomehcm --extract IDsforextract_2A.txt --recode A --real-ref-alleles --output-chr M --out step2avarsofinterest
+```
+
+```{r}
+jabin <- fread("step2avarsofinterest.raw", header=T)
+jabin <- data.frame(jabin)
+
+jabin$ref <- rowSums(jabin[7:ncol(jabin)] == "0", na.rm=T)
+jabin$hets <- rowSums(jabin[7:ncol(jabin)-1] == "1", na.rm=T)
+jabin$homs <- rowSums(jabin[7:ncol(jabin)-2] == "2", na.rm=T)
+jabin$miss <- rowSums(is.na(jabin[7:ncol(jabin)-3]))
+
+#list hets
+hets <- jabin[which(jabin$hets > 0),]
+hets_2 <- data.frame(hets$FID, hets$hets)
+colnames(hets_2) <- c("eid", "count")
+write.table(hets_2, "step2Ahets.txt", quote=F, row.names=F)
+
+#list homs
+homs <- jabin[which(jabin$homs > 0),]
+homs_2 <- data.frame(homs$FID)
+colnames(homs_2) <- c("eid")
+write.table(homs_2, "step2Ahoms.txt", quote=F, row.names=F)
+
+#list het genes
+hets_3 <- data.frame(hets[1], hets[7:(ncol(hets)-4)])
+for(i in (1:nrow(hets_3))){
+    hets_3$var[i] <- paste((colnames(hets_3)[which(hets_3[i,1:(ncol(hets_3)-1)] == 1)]),collapse = ",")
+}
+hets_3$var <- gsub("^X", "", hets_3$var)
+hets_3$var <- sub("^$", NA, hets_3$var)
+hets_3$var[is.na(hets_3$var)] <- "NA"
+rarvar <- data.frame(hets_3$FID, hets_3$var)
+splitted <- strsplit(as.character(rarvar$hets_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$hets_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+rarvar2 <- delete.na(rarvar2)
+write.table(rarvar2,"step2AIDvar.txt", quote=F, row.names=F, sep="\t")
+
+doneant8$var <- paste0(doneant8$ID, "_",doneant8$ALT)
+gene <- data.frame(doneant8$var, doneant8$SYMBOL)
+colnames(gene) <- c("var", "SYMBOL")
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshets_HCMstep2A.txt", quote=F, row.names=F)
+
+#homs genes
+homs_3 <- data.frame(homs[1], homs[7:(ncol(hets)-4)])
+for(i in (1:nrow(homs_3))){
+    homs_3$var[i] <- paste((colnames(homs_3)[which(homs_3[i,1:(ncol(homs_3)-1)] == 2)]),collapse = ",")
+}
+homs_3$var <- gsub("^X", "", homs_3$var)
+homs_3$var <- sub("^$", NA, homs_3$var)
+homs_3$var[is.na(homs_3$var)] <- "NA"
+rarvar <- data.frame(homs_3$FID, homs_3$var)
+splitted <- strsplit(as.character(rarvar$homs_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$homs_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+rarvar2 <- delete.na(rarvar2)
+write.table(rarvar2,"step2AIDvar_homs.txt", quote=F, row.names=F, sep="\t")
+
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshoms_HCMstep2A.txt", quote=F, row.names=F)
+```
+
+## Step 2B:      
+
+as (2A) above plus meets a gnomAD filter allele frequency (FAF) threshold for HCM (0.00004).
+  To identify variants above the maximum credible allele frequency for HCM, FAF is the highest filtering allele frequency across all gnomAD populations (“popmax”) for each variant.      
+
+```{r ant8 - Step 2b}
+doneant8 <- fread("step2Avars.txt", header=T, sep="\t")
+doneant8 <- data.frame(doneant8)
+class(doneant8$gnomADg_faf95_popmax)
+#numeric
+done3 <- doneant8[which(doneant8$gnomADg_faf95_popmax < 0.00004 | is.na(doneant8$gnomADg_faf95_popmax)),]
+write.table(done3, "step2Bvars.txt", quote=F, row.names=F, sep="\t")
+
+togo <- data.frame(done3$ID)
+write.table(togo, "IDsforextract_2B.txt", quote=F, row.names=F, col.names=F)
+```
+
+```{bash}
+plink --bfile ukb200exomehcm --extract IDsforextract_2B.txt --recode A --real-ref-alleles --output-chr M --out step2bvarsofinterest
+```
+
+```{r}
+jabin <- fread("step2bvarsofinterest.raw", header=T)
+jabin <- data.frame(jabin)
+
+jabin$ref <- rowSums(jabin[7:ncol(jabin)] == "0", na.rm=T)
+jabin$hets <- rowSums(jabin[7:ncol(jabin)-1] == "1", na.rm=T)
+jabin$homs <- rowSums(jabin[7:ncol(jabin)-2] == "2", na.rm=T)
+jabin$miss <- rowSums(is.na(jabin[7:ncol(jabin)-3]))
+
+#list hets
+hets <- jabin[which(jabin$hets > 0),]
+hets_2 <- data.frame(hets$FID, hets$hets)
+colnames(hets_2) <- c("eid", "count")
+write.table(hets_2, "step2Bhets.txt", quote=F, row.names=F)
+
+#count homs
+table(jabin$homs)
+#    0
+#200643
+#none
+
+#hets genes
+hets_3 <- data.frame(hets[1], hets[7:(ncol(hets)-4)])
+for(i in (1:nrow(hets_3))){
+    hets_3$var[i] <- paste((colnames(hets_3)[which(hets_3[i,1:(ncol(hets_3)-1)] == 1)]),collapse = ",")
+}
+hets_3$var <- gsub("^X", "", hets_3$var)
+hets_3$var <- sub("^$", NA, hets_3$var)
+hets_3$var[is.na(hets_3$var)] <- "NA"
+rarvar <- data.frame(hets_3$FID, hets_3$var)
+splitted <- strsplit(as.character(rarvar$hets_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$hets_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+rarvar2 <- delete.na(rarvar2)
+write.table(rarvar2,"step2BIDvar.txt", quote=F, row.names=F, sep="\t")
+
+done3 <- fread("step2Bvars.txt", header=T, sep="\t")
+done3 <- data.frame(done3)
+done3$var <- paste0(done3$ID, "_",done3$ALT)
+gene <- data.frame(done3$var, done3$SYMBOL)
+colnames(gene) <- c("var", "SYMBOL")
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshets_HCMstep2B.txt", quote=F, row.names=F)
+```
+
+## Step 3A:
+### !Manual Assessment required
+
+as (2B) above plus meets criteria would report as P/LP if you saw it in HCM - annotated pathogenic/likely pathogenic using Cardioclassifier (CC - https://www.cardioclassifier.org/) in a autosomal dominant fashion for HCM (e.g. assessed as heterozygotes) and additional manual curation from literature (Walsh et al. 2019; Table S6).     
+  CC supports disease specific interpretation of genetic variants in genes associated with Inherited Cardiac Conditions (ICCs), according to guidelines released by the American College of Medical Genetics and Genomics (2015).
+  The variants included in this step from Walsh et al. 2019 were called as pathogenic/likely-pathogenic and had a flag of ACMG rules PP5, PP4, PP1, PM6, PM3, PS3, PS2, PM6, PS2, PP1.  
+  
+GrCh38 variants lifted over to GrCh37 for CardioClassifier.       
+
+```{r step 3A}
+done3 <- fread("step2Bvars.txt", header=T, sep="\t")
+done3 <- data.frame(done3)
+
+forcc <- data.frame(done3$ID, done3$CHROM, done3$POS, done3$REF, done3$ALT)
+forcc$forlift <- paste0("chr",forcc$done3.CHROM, ":", forcc$done3.POS,"-", forcc$done3.POS)
+write.table(forcc, "hcm_forcc_grch38.txt", quote=F, row.names=F, col.names=F)
+
+#lift it over to grch37 on UCSC (https://genome.ucsc.edu/cgi-bin/hgLiftOver) or liftover script = HCM_CC_input.txt.    
+#CardioClassifier output = HCM_CC_out_het.txt.    
+
+#join grch37 file with cardioclassifier input file and output file
+#then join this dataset with the list of 2B variants
+lift <- read.table("HCM_CC_input.txt", header=T)
+colnames(lift) <- c("Chr","Pos", "Ref", "Alt")
+forcc <- read.table("hcm_forcc_grch38.txt", header=F)
+colnames(forcc) <- c("ID","Chr","POS", "REF", "ALT","forlift")
+tgthr <- data.frame(forcc,lift)
+cc <- fread("HCM_CC_out_het.txt")
+done <- join(tgthr, cc, type="left", by=c("Chr", "Pos", "Ref", "Alt"))
+colnames(done)[2] <- "CHROM"
+colnames(done)[8] <- "grch37"
+done4 <- join(done3, done, type="left", by=c("CHROM", "POS", "REF", "ALT"))
+
+#Filter for those that are P/LP in CC
+done5 <- done4[which(done4$ACMG_class == "Likely Pathogenic" | done4$ACMG_class == "Pathogenic"),]
+
+#cosegregation data from Walsh et al. 2019
+coseg <- read.table("coseg.txt", header=T)
+colnames(coseg)[1] <- "SYMBOL"
+colnames(coseg)[2] <- "HGVSc_2"
+#change frameshifts to c.X_Xdel only
+coseg$HGVSc_2 <- as.character(coseg$HGVSc_2)
+coseg$HGVSc_2[coseg$HGVSc_2 == "c.1357_1358delCC"] <- "c.1357_1358del"
+coseg$HGVSc_2[coseg$HGVSc_2 == "c.2864_2865delCT"] <- "c.2864_2865del"
+
+#reshape the VEP output of HGVSc
+library(splitstackshape)
+done5B2 <- cSplit(done3, 'HGVSc', sep=":", type.convert=FALSE)
+
+#join coseg data with large dataframe and see if IDs in step 2B variants
+done5B3 <- join(coseg, done5B2, type="left", by=c("HGVSc_2"))
+togo <- data.frame(done5B3[1:5]) 
+done3$found <- done3$ID %in% togo$ID  
+right <- done3[which(done3$found == "TRUE"),]
+right$found <- NULL
+
+#join the cardioclassifier variant list with the 2B variant list and remove duplicates
+done5Ba <- rbind.fill(done5, right)
+done5 <- done5Ba[!duplicated(done5Ba$ID),]
+
+write.table(done5, "step3Avars.txt", quote=F, row.names=F, sep="\t")
+
+togo <- data.frame(done5$ID)
+write.table(togo, "IDsforextract_3A.txt", quote=F, row.names=F, col.names=F)
+```
+
+```{bash}
+plink --bfile ukb200exomehcm --extract IDsforextract_3A.txt --recode A --real-ref-alleles --output-chr M --out step3avarsofinterest
+```
+
+```{r}
+jabin <- fread("step3avarsofinterest.raw", header=T)
+jabin <- data.frame(jabin)
+
+jabin$ref <- rowSums(jabin[7:ncol(jabin)] == "0", na.rm=T)
+jabin$hets <- rowSums(jabin[7:ncol(jabin)-1] == "1", na.rm=T)
+jabin$homs <- rowSums(jabin[7:ncol(jabin)-2] == "2", na.rm=T)
+jabin$miss <- rowSums(is.na(jabin[7:ncol(jabin)-3]))
+
+#list hets
+hets <- jabin[which(jabin$hets > 0),]
+hets_2 <- data.frame(hets$FID, hets$hets)
+colnames(hets_2) <- c("eid", "count")
+write.table(hets_2, "step3Ahets.txt", quote=F, row.names=F)
+
+#hets genes
+hets_3 <- data.frame(hets[1], hets[7:(ncol(hets)-4)])
+for(i in (1:nrow(hets_3))){
+    hets_3$var[i] <- paste((colnames(hets_3)[which(hets_3[i,1:(ncol(hets_3)-1)] == 1)]),collapse = ",")
+}
+hets_3$var <- gsub("^X", "", hets_3$var)
+hets_3$var <- sub("^$", NA, hets_3$var)
+hets_3$var[is.na(hets_3$var)] <- "NA"
+rarvar <- data.frame(hets_3$FID, hets_3$var)
+splitted <- strsplit(as.character(rarvar$hets_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$hets_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+rarvar2 <- delete.na(rarvar2)
+write.table(rarvar2,"step3AIDvar.txt", quote=F, row.names=F, sep="\t")
+
+done5 <- fread("step3Avars.txt", header=T, sep="\t")
+done5 <- data.frame(done5)
+done5$var <- paste0(done5$ID, "_",done5$ALT)
+gene <- data.frame(done5$var, done5$SYMBOL)
+colnames(gene) <- c("var", "SYMBOL")
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshets_HCMstep3A.txt", quote=F, row.names=F)
+```
+
+## Step 3B:
+
+as (2B*) above plus has been found in someone with HCM and deemed pathogenic/likely pathogenic based on the evidence provided to ClinVar.     
+  ClinVar processes submissions reporting variants found in patient samples, assertions made regarding their clinical significance, information about the submitter, and other supporting data.    
+```{r step 3B}
+#Which are found in HCM in ClinVar?
+done3 <- fread("step2Bvars.txt", header=T, sep="\t")
+done3 <- data.frame(done3)
+
+hyp <- c("Hypertrophic", "hypertrophic")
+done5Ba <- done3[grepl(paste(hyp, collapse="|"), done3$ClinVar_CLNDN),]
+
+done5Bb <- done5Ba[which(done5Ba$ClinVar_CLNSIG == "Pathogenic" | done5Ba$ClinVar_CLNSIG == "Likely_pathogenic" | done5Ba$ClinVar_CLNSIG == "Pathogenic/Likely_pathogenic"),]
+
+done5B <- done5Bb[which(done5Bb$ClinVar_CLNREVSTAT == "criteria_provided,_multiple_submitters,_no_conflicts" | done5Bb$ClinVar_CLNREVSTAT == "reviewed_by_expert_panel" | done5Bb$ClinVar_CLNREVSTAT == "practice_guideline"),]
+
+write.table(done5B, "step3Bvars.txt", quote=F, row.names=F, sep="\t")
+
+togo <- data.frame(done5B$ID)
+write.table(togo, "IDsforextract_3B.txt", quote=F, row.names=F, col.names=F)
+```
+
+```{bash}
+plink --bfile ukb200exomehcm --extract IDsforextract_3B.txt --recode A --real-ref-alleles --output-chr M --out step3bvarsofinterest
+```
+
+```{r}
+jabin <- fread("step3bvarsofinterest.raw", header=T)
+jabin <- data.frame(jabin)
+
+jabin$ref <- rowSums(jabin[7:ncol(jabin)] == "0", na.rm=T)
+jabin$hets <- rowSums(jabin[7:ncol(jabin)-1] == "1", na.rm=T)
+jabin$homs <- rowSums(jabin[7:ncol(jabin)-2] == "2", na.rm=T)
+jabin$miss <- rowSums(is.na(jabin[7:ncol(jabin)-3]))
+
+#list hets
+hets <- jabin[which(jabin$hets > 0),]
+hets_2 <- data.frame(hets$FID, hets$hets)
+colnames(hets_2) <- c("eid", "count")
+write.table(hets_2, "step3Bhets.txt", quote=F, row.names=F)
+
+#hets genes
+hets_3 <- data.frame(hets[1], hets[7:(ncol(hets)-4)])
+for(i in (1:nrow(hets_3))){
+    hets_3$var[i] <- paste((colnames(hets_3)[which(hets_3[i,1:(ncol(hets_3)-1)] == 1)]),collapse = ",")
+}
+hets_3$var <- gsub("^X", "", hets_3$var)
+hets_3$var <- sub("^$", NA, hets_3$var)
+hets_3$var[is.na(hets_3$var)] <- "NA"
+rarvar <- data.frame(hets_3$FID, hets_3$var)
+splitted <- strsplit(as.character(rarvar$hets_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$hets_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+rarvar2 <- delete.na(rarvar2)
+write.table(rarvar2,"step3BIDvar.txt", quote=F, row.names=F, sep="\t")
+
+done5B <- fread("step3Bvars.txt", header=T, sep="\t")
+done5B <- data.frame(done5B)
+done5B$var <- paste0(done5B$ID, "_",done5B$ALT)
+gene <- data.frame(done5B$var, done5B$SYMBOL)
+colnames(gene) <- c("var", "SYMBOL")
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshets_HCMstep3B.txt", quote=F, row.names=F)
+```
+
+## Step 4:
+
+as (3A) [CardioClassifier] plus incorporating ClinVar P/LP and HCM evidence - it has actually been seen before in people with HCM.     
+
+```{r step 4}
+done5 <- fread("step3Avars.txt", fill=T)
+done5 <- data.frame(done5)
+
+#Of those P/LP in CC, which have CLinVar evidence of HCM?
+hyp <- c("Hypertrophic", "hypertrophic")
+done6a <- done5[grepl(paste(hyp, collapse="|"), done5$ClinVar_CLNDN),]
+
+done6b <- done6a[which(done6a$ClinVar_CLNSIG == "Pathogenic" | done6a$ClinVar_CLNSIG == "Likely_pathogenic" | done6a$ClinVar_CLNSIG == "Pathogenic/Likely_pathogenic"),]
+
+done6 <- done6b[which(done6b$ClinVar_CLNREVSTAT == "criteria_provided,_multiple_submitters,_no_conflicts" | done6b$ClinVar_CLNREVSTAT == "reviewed_by_expert_panel" | done6b$ClinVar_CLNREVSTAT == "practice_guideline"),]
+
+write.table(done6, "step4vars.txt", quote=F, row.names=F, sep="\t")
+
+togo <- data.frame(done6$ID)
+write.table(togo, "IDsforextract_4.txt", quote=F, row.names=F, col.names=F)
+```
+
+```{bash}
+plink --bfile ukb200exomehcm --extract IDsforextract_4.txt --recode A --real-ref-alleles --output-chr M --out step4varsofinterest
+```
+
+```{r}
+jabin <- fread("step4varsofinterest_AD.raw", header=T)
+jabin <- data.frame(jabin)
+
+jabin$ref <- rowSums(jabin[7:ncol(jabin)] == "0", na.rm=T)
+jabin$hets <- rowSums(jabin[7:ncol(jabin)-1] == "1", na.rm=T)
+jabin$homs <- rowSums(jabin[7:ncol(jabin)-2] == "2", na.rm=T)
+jabin$miss <- rowSums(is.na(jabin[7:ncol(jabin)-3]))
+
+#list hets
+hets <- jabin[which(jabin$hets > 0),]
+hets_2 <- data.frame(hets$FID, hets$hets)
+colnames(hets_2) <- c("eid", "count")
+write.table(hets_2, "step4hets.txt", quote=F, row.names=F)
+
+#hets genes
+hets_3 <- data.frame(hets[1], hets[7:(ncol(hets)-4)])
+for(i in (1:nrow(hets_3))){
+    hets_3$var[i] <- paste((colnames(hets_3)[which(hets_3[i,1:(ncol(hets_3)-1)] == 1)]),collapse = ",")
+}
+hets_3$var <- gsub("^X", "", hets_3$var)
+hets_3$var <- sub("^$", NA, hets_3$var)
+hets_3$var[is.na(hets_3$var)] <- "NA"
+rarvar <- data.frame(hets_3$FID, hets_3$var)
+splitted <- strsplit(as.character(rarvar$hets_3.var), ",")
+rarvar2 <- data.frame(v1 = rep.int(rarvar$hets_3.FID, sapply(splitted, length)), v2=unlist(splitted))
+rarvar2$v2 <- gsub("^X", "", rarvar2$v2)
+rarvar2$v2 <- gsub(".", ":", rarvar2$v2, fixed = TRUE)
+colnames(rarvar2) <- c("eid","var")
+rarvar2 <- rarvar2[!duplicated(rarvar2),]
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]
+}
+rarvar2 <- delete.na(rarvar2)
+
+write.table(rarvar2,"step4IDvar.txt", quote=F, row.names=F, sep="\t")
+
+done6 <- fread("step4vars.txt", header=T, sep="\t")
+done6 <- data.frame(done6)
+done6$var <- paste0(done6$ID, "_",done6$ALT)
+gene <- data.frame(done6$var, done6$SYMBOL)
+colnames(gene) <- c("var", "SYMBOL")
+rarvar3 <- join(rarvar2, gene, type="left", by="var")
+write.table(rarvar3, "listofgeneshets_HCMstep4.txt", quote=F, row.names=F)
+```
+
+## Summary Table: summarytable_meta.txt      
+
+Took a curated "metadata" UKB phenotype file that contains summary information on UKB participants. 
+Subsetted the data for those with Exome data.
+Added 7 columns explaining the steps above (data is binary; 0 - no variant, 1 - has variant):    
+Step 0 = 1:  people have no rare PAV = 1  
+Step 1 = 1:  people any rare PAV (syndromic or not)  
+Step 2A = 1:  people have a rare PAV in the 8 sarcomere genes  
+Step 2B = 1:  people have a rare PAV (FAF for HCM) variant in the 8 sarcomere genes  
+Step 3A = 1:  people have a P/LP (CC) rare (FAF) variant in the 8 sarcomere genes  
+Step 3B = 1:  people have a ClinVar HCM rare (FAF) P/LP variant in the 8 sarcomere genes  
+Step 4 = 1:  people have a P/LP (CC), ClinVar, rare (FAF) variant in the 8 sarc genes  
+  PAV = protein altering variant  
+  FAF = filtering allele frequency  
+  P/LP = flagged as pathogenic or likely pathogenic  
+  CC = CardioClassifier  
+The columns summarise all homozygotes and heterozygotes into one.   
+
+```{r summarise table}
+meta$hasExomeData200k <- meta$eid %in% fam$V1
+cmrnex <- meta[which(meta$hasExomeData200k == "TRUE"),]
+
+#READ IN
+hom_step_1 <- read.table("step1homs.txt", header=T)
+het_step_1 <- read.table("step1hets.txt", header=T)
+
+het_step_2A <- read.table("step2Ahets.txt", header=T)
+hom_step_2A <- read.table("step2Ahoms.txt", header=T)
+
+het_step_2B <- read.table("step2Bhets.txt", header=T)
+
+het_step_3A <- read.table("step3Ahets.txt", header=T)
+
+het_step_3B <- read.table("step3Bhets.txt", header=T)
+
+het_step_4 <- read.table("step4hets.txt", header=T)
+
+names(het_step_1)
+names(het_step_2A)
+names(het_step_2B)
+names(het_step_3A)
+names(het_step_3B)
+names(het_step_4)
+names(hom_step_1)
+names(hom_step_2A)
+#Should all be eid
+
+#STEP 1
+tmp1 <- cmrnex$eid %in% hom_step_1$eid
+tmp2 <- cmrnex$eid %in% het_step_1$eid
+tmp <- data.frame(tmp1, tmp2)
+tmp$HCMstep1 <- do.call('pmax',c(tmp[,1:2],list(na.rm=TRUE)))
+
+#STEP 2A
+tmp$tmp3 <- cmrnex$eid %in% het_step_2A$eid
+tmp$tmp4 <- cmrnex$eid %in% hom_step_2A$eid
+tmp$HCMstep2A <- do.call('pmax',c(tmp[,4:5],list(na.rm=TRUE)))
+
+#STEP 2B
+tmp$HCMstep2B <- as.numeric(cmrnex$eid %in% het_step_2B$eid)
+
+#STEP 3A
+tmp$HCMstep3A <- as.numeric(cmrnex$eid %in% het_step_3A$eid)
+
+#STEP 3B
+tmp$HCMstep3B <- as.numeric(cmrnex$eid %in% het_step_3B$eid)
+
+#STEP 4
+tmp$HCMstep4 <- as.numeric(cmrnex$eid %in% het_step_4$eid)
+
+#STEP 0
+names(tmp)
+tmp$HCMstep0 <- do.call('pmax',c(tmp[,c(3,6,7,8,9,10)],list(na.rm=TRUE)))
+tmp$HCMstep0 <- gsub("1", 5, tmp$HCMstep0)
+tmp$HCMstep0 <- gsub("0", 1, tmp$HCMstep0)
+tmp$HCMstep0 <- gsub("5", 0, tmp$HCMstep0)
+#people with 1 in flag_step0 don't have a PAV in any of the HCM genes of interest. 
+write.table(tmp, "summarydata.txt", quote=F, row.names=F)
+
+tmp3 <- tmp[,c(11,3,6,7,8,9,10)]
+final <- data.frame(cmrnex, tmp3)
+dim(final)
+#200632
+head(final)
+write.table(final, "summarytable_meta.txt", quote=F, row.names=F, sep="\t")
+```
