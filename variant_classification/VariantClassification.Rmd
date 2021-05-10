@@ -564,31 +564,7 @@ done4 <- join(done3, done, type="left", by=c("CHROM", "POS", "REF", "ALT"))
 
 #Filter for those that are P/LP in CC
 done5 <- done4[which(done4$ACMG_class == "Likely Pathogenic" | done4$ACMG_class == "Pathogenic"),]
-
-#incorporate cosegregation data and manual variant curation from Walsh et al. 2019
-coseg <- read.table("coseg.txt", header=T)
-colnames(coseg)[1] <- "SYMBOL"
-colnames(coseg)[2] <- "HGVSc_2"
-#change frameshifts to c.X_Xdel only
-coseg$HGVSc_2 <- as.character(coseg$HGVSc_2)
-coseg$HGVSc_2[coseg$HGVSc_2 == "c.1357_1358delCC"] <- "c.1357_1358del"
-coseg$HGVSc_2[coseg$HGVSc_2 == "c.2864_2865delCT"] <- "c.2864_2865del"
-
-#reshape the VEP output of HGVSc
-library(splitstackshape)
-done5B2 <- cSplit(done3, 'HGVSc', sep=":", type.convert=FALSE)
-
-#join coseg data with large dataframe and see if IDs in step 2B variants
-done5B3 <- join(coseg, done5B2, type="left", by=c("HGVSc_2"))
-togo <- data.frame(done5B3[1:5]) 
-done3$found <- done3$ID %in% togo$ID  
-right <- done3[which(done3$found == "TRUE"),]
-right$found <- NULL
-
-#join the cardioclassifier variant list with the 2B variant list and remove duplicates
-done5Ba <- rbind.fill(done5, right)
-done5 <- done5Ba[!duplicated(done5Ba$ID),]
-
+###manually assess ACMG rules used
 write.table(done5, "step3Avars.txt", quote=F, row.names=F, sep="\t")
 
 togo <- data.frame(done5$ID)
@@ -627,8 +603,10 @@ done3 <- data.frame(done3)
 
 hyp <- c("Hypertrophic", "hypertrophic")
 done5Ba <- done3[grepl(paste(hyp, collapse="|"), done3$ClinVar_CLNDN),]
+##manually assess website entries
 
 done5Bb <- done5Ba[which(done5Ba$ClinVar_CLNSIG == "Pathogenic" | done5Ba$ClinVar_CLNSIG == "Likely_pathogenic" | done5Ba$ClinVar_CLNSIG == "Pathogenic/Likely_pathogenic"),]
+##manually assess website entries
 
 done5B <- done5Bb[which(done5Bb$ClinVar_CLNREVSTAT == "criteria_provided,_multiple_submitters,_no_conflicts" | done5Bb$ClinVar_CLNREVSTAT == "reviewed_by_expert_panel" | done5Bb$ClinVar_CLNREVSTAT == "practice_guideline"),]
 
