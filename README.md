@@ -17,7 +17,7 @@ Code for reproducing the tables and plots.
 
 ## Citation 
 
-de Marvao A, McGurk KA, Zheng SL, Thanaj M, Bai W, Duan J, Biffi C, Mazzarotto F, Statton B, Dawes TJ, Savioli N, Halliday BP, Xu X, Buchan RJ, Baksi AJ, Quinlan M, Tokarczuk P, Tayal U, Francis C, Whiffin N, Theotokis PI, Zhang X, Jang M, Berry A, Pantazis A, Barton PJ, Rueckert D, Prasad SK, Walsh R, Ho CY, Cook SA, Ware JS and O’Regan DP. Phenotypic Expression and Outcomes in Individuals with Rare Genetic Variants of Hypertrophic Cardiomyopathy. *J Am Coll Cardiol.* 2021;78,15-28. DOI:[10.1016/j.jacc.2021.07.017](http://dx.doi.org/10.1016/j.jacc.2021.07.017)
+de Marvao A, McGurk KA, Zheng SL, Thanaj M, Bai W, Duan J, Biffi C, Mazzarotto F, Statton B, Dawes TJ, Savioli N, Halliday BP, Xu X, Buchan RJ, Baksi AJ, Quinlan M, Tokarczuk P, Tayal U, Francis C, Whiffin N, Theotokis PI, Zhang X, Jang M, Berry A, Pantazis A, Barton PJ, Rueckert D, Prasad SK, Walsh R, Ho CY, Cook SA, Ware JS and O’Regan DP. Phenotypic Expression and Outcomes in Individuals with Rare Genetic Variants of Hypertrophic Cardiomyopathy. *J Am Coll Cardiol.* 2021;78(11),1097-1110. DOI:[10.1016/j.jacc.2021.07.017](http://dx.doi.org/10.1016/j.jacc.2021.07.017)
 
 
 
