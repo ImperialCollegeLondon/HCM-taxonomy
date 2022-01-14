@@ -1,4 +1,4 @@
-# Variant pathogenicity and expressivity in hypertrophic cardiomyopathy
+# Association of common and rare HCM-associated variants on cardiac shape and motion
 
 * [Variant Classification](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/variant_classification)  
 Variant interpretation in HCM.  
