@@ -17,7 +17,8 @@ Code for reproducing the tables and plots.
 
 ## Citation
 
-
+Curran L, de Marvao A, Inglese P, McGurk KA, Schiratti P-R, Zheng SL, Clement A, Li S, Pua CJ, Shah M, Jafari M, Theotokis P, Buchan R, Raphael CE, Baksi AJ, Pantazis A, Halliday BP, Pennell DJ, Chin CWL,
+Cook SA, Prasad SK, Ware JS, O’Regan DP. A phenotypic taxonomy of hypertrophic cardiomyopathy. _MedRxiv_. 2023
 
 
 
