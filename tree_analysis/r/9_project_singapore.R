@@ -27,6 +27,8 @@ py_trustworthiness <- scikit['manifold']$trustworthiness
 
 # Functions ====================================================================
 
+# This function plots the min, mean, median and max of WT to compare
+# RBH and Singapore cohorts
 summary_wt_plot <- function(wt_mat, dataset, is_plp) {
   lapply(c("min", "mean", "median", "max"), function(f) {
     fun <- switch(
@@ -47,6 +49,7 @@ strip_values <- function(x) {
   substr(x, 1, 9)
 }
 
+# ggplot2 params for tree plotting
 tree_plot_params <- list(
   xlab("Z1"), 
   ylab("Z2"),
@@ -145,6 +148,9 @@ data_all <- lapply(frames, function(fr) {
 
 # Adjust wall thicknesses ======================================================
 
+# WT are adjusted by residualization from a linear model using age at scan
+# and sex as covariates. The adjustement is performed within cohort, separately.
+
 # RBH
 
 wt_rbh_adj <- lapply(frames, function(fr) {
@@ -212,7 +218,6 @@ lapply(frames, function(fr) {
     plot_grid(plotlist = .)
   }
 
-
 # Full dataset adjusted
 
 data_adj <- lapply(frames, function(fr) {
@@ -240,6 +245,9 @@ lapply(frames, function(fr) {
 })
 
 # PCA ==========================================================================
+
+# Calculate first 5 PC from RBH and project Singapore onto them. These are
+# used as features to predict the tree coordinates.
 
 pca <- lapply(frames, function(fr) {
   data_adj[[fr]] %>%
