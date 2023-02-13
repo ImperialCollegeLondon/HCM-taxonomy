@@ -119,6 +119,8 @@ for (i in seq_len(length(out_xtable))) {
 
 mat_vals <- as.data.frame(mat_vals) %>%
   set_rownames(stability_test_conf$res)
+
+# Print for LaTeX
 print(xtable::xtable(mat_vals, digits = 4))
 
 # Select optimal partitioning ==================================================
@@ -131,58 +133,6 @@ if (frame == "ES") {
   sel_res <- "res.0.1"
 }
 sel_partition <- results_cluster$clusters[[sel_res]]
-
-# Bootstrapping ================================================================
-
-# n_boot <- 1e4
-#
-# run_clustering <- function(i) {
-#   boot_idx <- sample(nrow(wt_values_adj), nrow(wt_values_adj), replace = TRUE)
-#
-#   parts <- find_clusters(wt_values_adj, test_res)
-#   list(partitions = parts, obs = obs)
-# }
-#
-# cl <- makeCluster(detectCores() - 1)
-# clusterExport(cl = cl, varlist = c("wt_values_adj"))
-# boot_partitions <- parLapply(cl, seq_len(n_boot), run_clustering)
-#
-# saveRDS(
-#   boot_partitions,
-#   file = paste0("../results/bootstrap_clusters_", decim, ".rds")
-# )
-#
-# # ARI bootstrapping
-#
-# boot_partitions <- readRDS(
-#   paste0("../results/bootstrap_clusters_", decim, ".rds")
-# )
-#
-# ari_values <- matrix(NA, n_boot, length(seq(0.1, 1, 0.1)))
-# colnames(ari_values) <- paste0("res.", seq(0.1, 1, 0.1))
-# ari_values <- as.data.frame(ari_values)
-# for (b in seq_len(n_boot)) {
-#   print(b)
-#   boot_obs <- boot_partitions[[b]]$obs
-#   for (r in seq(0.1, 1, 0.1)) {
-#     part_table <- data.frame(
-#       obs = boot_obs,
-#       partition_boot = boot_partitions[[b]]$partitions[[paste0("res.", r)]]
-#     ) %>%
-#       filter(!duplicated(obs))
-#     part_table <- inner_join(
-#       part_table, orig_partitions[[paste0("res.", r)]],
-#       by = "obs"
-#     )
-#     ari_values[b, paste0("res.", r)] <- mclust::adjustedRandIndex(
-#       part_table$partition_boot, part_table$partition_orig
-#     )
-#   }
-# }
-#
-# saveRDS(ari_values, paste0("../results/bootstrap_ari_", decim, ".rds"))
-#
-# boxplot(ari_values)
 
 # UMAP =========================================================================
 
@@ -266,7 +216,7 @@ rm(plot_umap_clusters, plot_umap_geno)
 
 # ggsave(
 #   filename = here(file.path(
-#     "../results", paste0("plot_umap_", frame, "_decim_", decim, ".pdf")
+#     "../plots", paste0("plot_umap_", frame, "_decim_", decim, ".pdf")
 #   )),
 #   dpi = 300, width = 12, height = 6, plot = p_cluster_combo
 # )
@@ -312,23 +262,6 @@ plot_composition <- tibble(
   ylab("Number of subjects") +
   theme_minimal_hgrid() +
   theme(plot.margin = unit(c(1, 1, 1, 1), "cm"))
-  
-
-# p_signif <- -log10(padj_list[[sel_res]]) %>%
-#   reshape2::melt() %>%
-#   as_tibble() %>%
-#   mutate(Var2 = as.character(Var2)) %>%
-#   mutate(Var2 = replace(Var2, Var2 == "PLP", "P/LP")) %>%
-#   rename(Genotype = Var2) %>%
-#   ggplot(aes(x = factor(Var1), y = value, fill = Genotype)) +
-#   geom_bar(position = "dodge", stat = "identity", color = "black") +
-#   scale_fill_brewer(palette = "Set1") +
-#   geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
-#   xlab("Cluster") +
-#   ylab("-log10(P)") +
-#   theme_minimal_hgrid()
-# 
-# p_enrich <- plot_grid(plotlist = list(p_comp, p_signif), nrow = 2)
 
 plot_scatter <- plot_grid(
   plotlist = list(
@@ -341,39 +274,10 @@ plot_scatter <- plot_grid(
 
 ggsave(
   file = paste0(
-    "../results/plot_umap_", frame, "_decim_0.99.pdf"
+    "../plots/plot_umap_", frame, "_decim_0.99.pdf"
   ),
   plot = plot_scatter, width = 8, height = 8, dpi = 300
 )
-
-boxplot(rowMedians(wt_values_adj) ~ partitions$res.0.1)
-
-# # Permutation test for cluster enrichment ======================================
-# 
-# odds_ratio_obs <- fisher.test(
-#   as.integer(sel_partition) == 1,
-#   wallthickness$genotype == "PLP"
-# )$estimate
-# 
-# n_perms <- 1e4
-# odds_ratio_perm <- numeric(n_perms)
-# for (p in 1:n_perms) {
-#   shuffle_geno <- sample(wallthickness$genotype,
-#     replace = FALSE
-#   )
-#   odds_ratio_perm[p] <- fisher.test(
-#     as.integer(sel_partition) == 1,
-#     shuffle_geno == "PLP"
-#   )$estimate
-# }
-# 
-# p_perms <- data.frame(odds = odds_ratio_perm) %>%
-#   ggplot(aes(x = odds)) +
-#   geom_histogram(fill = "lightgray", color = "black") +
-#   theme_minimal_hgrid() +
-#   xlab("Permuted odds ratios") +
-#   geom_vline(xintercept = odds_ratio_obs, linetype = "dashed", color = "red")
-
 
 # WT vs genotype ===============================================================
 
@@ -387,7 +291,6 @@ vals <- wt_values_adj %>%
   ) %>%
   ungroup() %>%
   mutate(Cluster = sel_partition)
-
 
 # Median WT vs genotype
 
@@ -416,6 +319,7 @@ pvals_by_geno <- c(
 )
 p_adj_by_geno <- p.adjust(pvals_by_geno, "BH")
 
+# Manually set the coordinates for significance symbols
 if (frame == "ED") {
   y_pos <- c(3, 2.3, 3.2)
   y_range <- c(-1.7, 3.5)
@@ -540,6 +444,6 @@ p_wt <- cowplot::plot_grid(
   nrow = 1
 )
 ggsave(
-  filename = paste0("../results/median_wt_", frame, "_decim_0.99.pdf"),
+  filename = paste0("../plots/median_wt_", frame, "_decim_0.99.pdf"),
   plot = p_wt, dpi = 300, width = 12, height = 6
 )
