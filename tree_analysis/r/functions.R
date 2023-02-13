@@ -67,7 +67,10 @@ load_metadata <- function(data_root) {
 
 
 # Load wall thickness data
-load_wallthickness <- function(data_root, frame) {
+load_wallthickness <- function(data_root, frame, decim = 0.99, dataset = "rbh",
+                               load_curvature = FALSE) {
+  
+  require(glue)
   
   if (!frame %in% c("ED", "ES", "ED_ES")) {
     stop("frame must be one of 'ED', 'ES', 'ED_ES'")
@@ -76,10 +79,17 @@ load_wallthickness <- function(data_root, frame) {
   if (frame == "ED_ES") {
     wt_single_frame <- vector("list", 2) %>% set_names(c("ED", "ES"))
     for (fr in c("ED", "ES")) {
+      
+      if (dataset == "rbh") {
+        fname <- glue("wallthickness_{fr}_decimated_{decim}.csv")
+      } else if (dataset == "singapore") {
+        fname <- glue("wallthickness_{fr}_decimated_{decim}_singapore.csv")
+      }
+      
       wt_single_frame[[fr]] <- read.csv(
         file.path(
           data_root,
-          paste0("wallthickness_", fr, "_decimated_0.99.csv")
+          fname
         )
       ) %>%
         select(-X) %>%
@@ -92,14 +102,35 @@ load_wallthickness <- function(data_root, frame) {
                                 wt_single_frame[["ES"]])
     rm(wt_single_frame)
   } else {
+    
+    if (dataset == "rbh") {
+      wt_fname <- glue("wallthickness_{frame}_decimated_{decim}.csv")
+      curv_fname <- glue("curvature_{frame}_decimated_{decim}.csv")
+    } else if (dataset == "singapore") {
+      wt_fname <- glue("wallthickness_{frame}_decimated_{decim}_singapore.csv")
+      curv_fname <- glue("curvature_{frame}_decimated_{decim}_singapore.csv")
+    }
+    
     wallthickness <- read.csv(
       file.path(
         data_root,
-        paste0("wallthickness_", frame, "_decimated_0.99.csv")
+        wt_fname
       )
     ) %>%
       select(-X) %>%
-      rename_with(~ gsub("X", "wt", .x), starts_with("X")) %>%
+      rename_with(~ gsub("X", "wt", .x), starts_with("X"))
+    
+    if (load_curvature) {
+      curvature <- read.csv(
+        file.path(data_root, curv_fname)
+      ) %>%
+        select(-X) %>%
+        rename_with(~ gsub("X", "curv", .x), starts_with("X"))
+      
+      wallthickness <- inner_join(wallthickness, curvature)
+    }
+    
+    wallthickness <- wallthickness %>%
       mutate_at("ID", list(~ str_split(., "_") %>%
                              map_chr(., 1))) %>%
       filter(!duplicated(ID))
@@ -266,33 +297,41 @@ logit_to_probs <- function(logit) {
 
 
 # Perform cross validation GAM
-cross_validate_gam_tree <- function(X, y, n_cv) {
+cross_validate_gam_tree <- function(form, X, n_cv, type, method) {
   require(mgcv)
   require(caret)
+  require(pROC)
   require(ROCR)
   
-  dat <- cbind(X, data.frame(Y = y))
-  
   set.seed(123)
-  flds <- createFolds(dat$Y, k = n_cv, list = TRUE, returnTrain = FALSE)
+  flds <- createFolds(X$Y, k = n_cv, list = TRUE, returnTrain = FALSE)
   
-  all_probs <- numeric(nrow(dat))
-  auc_cv <- numeric(n_cv)
+  all_preds <- numeric(nrow(X))
   
-  for (cv in seq_len(n_cv)) {
-    dat_train <- dat[-flds[[cv]], ]
-    
-    mdl <- gam(as.formula(
-      paste0("Y ~ -1 + te(", colnames(X)[1], ", ", colnames(X)[2], ")")),
-      data = dat_train)
-    
-    preds <- predict(mdl, newdata = dat[flds[[cv]], ], type = "response")
-    probs <- logit_to_probs(preds)
-    
-    all_probs[flds[[cv]]] <- probs
-    lgPredObj <- prediction(list(probs), factor(dat$Y[flds[[cv]]]))
-    auc_cv[cv] <- performance(lgPredObj, "auc")@y.values[[1]]
+  pb <- progress::progress_bar$new(total = n_cv, width = 60,
+                                   format = "CV [:bar]", clear = F)
+  
+  if (type == "classification") {
+    family <- binomial()
+  } else if (type == "regression") {
+    family <- gaussian()
   }
   
-  return(list(auc = auc_cv, pred_probs = all_probs))
+  for (cv in seq_len(n_cv)) {
+    pb$tick()
+    dat_train <- X[-flds[[cv]], ]
+    mdl <- gam(form, data = dat_train, family = family,
+               method = method, select = TRUE)
+    preds <- predict(mdl, newdata = X[flds[[cv]], ], type = "response")
+    all_preds[flds[[cv]]] <- preds
+  }
+  pb$terminate()
+  
+  if (type == "classification") {
+    perf_all <- auc(X$Y, all_preds)
+  } else if (type == "regression") {
+    perf_all <- cor(X$Y, all_preds) ** 2
+  }
+  
+  return(list(perf_all = perf_all, preds = all_preds))
 }
