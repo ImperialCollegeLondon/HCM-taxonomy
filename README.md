@@ -1,5 +1,7 @@
 # A phenotypic taxonomy of hypertrophic cardiomyopathy
 
+[![DOI](https://zenodo.org/badge/426956166.svg)](https://zenodo.org/badge/latestdoi/426956166)
+
 * [Variant Classification](https://github.com/ImperialCollegeLondon/HCM_expressivity/tree/master/variant_classification)  
 Variant interpretation in HCM.  
 
