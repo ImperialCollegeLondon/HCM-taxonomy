@@ -68,6 +68,10 @@ metadata_dict <- read_csv(file.path(data_root, "metadata_dict.csv"))
 # Load survival data
 event_data <- read_csv(file.path(data_root, "survival_event_data.csv"))
 
+# Load PRS
+prs_data <- read_csv(file.path(data_root, "PRScs.HCM.MTAG.exc.MYBPC3.RBH.1KG.LD.csv")) %>%
+  mutate(ID = FID)
+
 tree_data <- lapply(c("ED", "ES"), function(frame) {
   # Load DDRtree
   ddrtree <- read_csv(
@@ -103,6 +107,48 @@ tree_data <- lapply(c("ED", "ES"), function(frame) {
     inner_join(event_data, by = "ID")
 }) %>%
   set_names(c("ED", "ES"))
+
+# PRS ==========================================================================
+
+preds_prs <- lapply(frames, function(fr) {
+  
+  message(glue("Frame = {fr}"))
+  
+  model_data <- tree_data[[fr]] %>%
+    inner_join(prs_data, by = "ID") %>%
+    mutate(Y = SCORE) %>%
+    as_tibble()
+  
+  bin_score <- (model_data$SCORE > median(model_data$SCORE)) * 1
+  model_data <- model_data %>%
+    mutate(score_bin = bin_score)
+  
+  model_data$score_bin <- factor(model_data$score_bin)
+  model_data$score_bin = dplyr::recode_factor(model_data$score_bin, `0` = "lo", `1` = "hi")
+  
+  model_data <- cbind(model_data, prcomp(model_data %>% select(Z1, Z2) %>% scale())$x)
+  
+  # Fit GAM to predict if P/LP from the tree coordinates
+  set.seed(123)
+  
+  gam_model <- train(
+    x = model_data %>%
+      select(Z1, Z2),
+    y = model_data$score_bin,
+    method = "gam",
+    trControl = trainControl(
+      method = "repeatedcv",
+      number = 10, repeats = 3,
+      summaryFunction = twoClassSummary,
+      classProbs = TRUE
+    ),
+    metric = "ROC",
+  )
+  
+  y_pred = predict(gam_model, type = "prob")
+  tibble(ID = model_data$ID, prob = y_pred)
+}) %>%
+  set_names(frames)
 
 # P/LP =========================================================================
 
@@ -279,6 +325,26 @@ OR <- lapply(frames, function(fr) {
   set_names(frames)
 
 # Plots ========================================================================
+
+plot_tree_hi_prs_probs <- lapply(frames, function(fr) {
+  model_data <- tree_data[[fr]] %>%
+    inner_join(preds_prs[[fr]])
+  
+  model_data %>%
+    ggplot(aes(x = Z1, y = Z2, color = prob)) +
+    geom_point(size = 2, alpha = 0.75) +
+    ggtitle(glue("Prob. high PRS - {fr}")) +
+    tree_plot_params +
+    theme(
+      legend.key.size = unit(6, "pt"),
+      legend.text = element_text(size = unit(6, "pt")),
+      legend.title = element_text(size = unit(8, "pt")),
+      legend.key.width = unit(0.75, "cm")
+    ) +
+    scale_color_viridis_c(option = "magma") +
+    coord_fixed()
+}) %>%
+  set_names(frames)
 
 plot_tree_plp_probs <- lapply(frames, function(fr) {
   model_data <- tree_data[[fr]] %>%
