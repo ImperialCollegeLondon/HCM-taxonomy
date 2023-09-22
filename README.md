@@ -25,7 +25,7 @@ Cook SA, Prasad SK, Ware JS, O’Regan DP. A phenotypic taxonomy of hypertrophic
 
 ## HCM Cohort Data Collection
 
-Patients included in our analysis were consecutively enrolled into a prospective registry at the National Institute for Health Research (NIHR) Royal Brompton Hospital Cardiovascular Biobank project between 2009-2015, after referral to the ICC service or CMR unit. In total, 436 were included in this study (see study flowchart in main paper). Clinical co-variates, medication status and anthropometric data, and 2D CMR measurments were collected at the date of study enrollment and at the time of CMR study, respectively. Clinical outcome (mortality) data was collected from review of NHS Shared Care Records (median follow-up time of 10.2 years). 
+Patients included in our analysis were consecutively enrolled into a prospective registry at the National Institute for Health Research (NIHR) Royal Brompton Hospital Cardiovascular Biobank project between 2009-2015, after referral to the ICC service or CMR unit. In total, 436 subjects were included in this study (see study flowchart in main paper). Clinical co-variates, medication status and anthropometric data, and 2D CMR measurements were collected at the date of study enrollment and at the time of CMR study, respectively. Clinical outcome (mortality) data was collected from review of NHS Shared Care Records (median follow-up time of 10.2 years). 
 
 
 
