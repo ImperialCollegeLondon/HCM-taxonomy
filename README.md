@@ -19,8 +19,8 @@ Code for reproducing the tables and plots.
 
 ## Citation
 
-Curran L, de Marvao A, Inglese P, McGurk KA, Schiratti P-R, Zheng SL, Clement A, Li S, Pua CJ, Shah M, Jafari M, Theotokis P, Buchan R, Raphael CE, Baksi AJ, Pantazis A, Halliday BP, Pennell DJ, Chin CWL,
-Cook SA, Prasad SK, Ware JS, O’Regan DP. A phenotypic taxonomy of hypertrophic cardiomyopathy. _medRxiv_. 2023
+Curran L, de Marvao A, Inglese P, McGurk KA, Schiratti PR, Clement A, Zheng SL, Li S, Pua CJ, Shah M, Jafari M, Theotokis P, Buchan RJ, Jurgens SJ, Raphael CE, Baksi AJ, Pantazis A, Halliday BP, Pennell DJ, Bai W, Chin CWL, Tadros R, Bezzina CR, Watkins H, Cook SA, Prasad SK, Ware JS, O'Regan DP. Genotype-Phenotype Taxonomy of Hypertrophic Cardiomyopathy. _Circ Genom Precis Med_. 2023 Dec;16(6):e004200. doi: [10.1161/CIRCGEN.123.004200](https://doi.org/10.1161/circgen.123.004200). 
+
 
 
 
