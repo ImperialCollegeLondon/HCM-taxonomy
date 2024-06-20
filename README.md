@@ -1,4 +1,4 @@
-# A phenotypic taxonomy of hypertrophic cardiomyopathy
+# Genotype-Phenotype Taxonomy of Hypertrophic Cardiomyopathy
 
 [![DOI](https://zenodo.org/badge/426956166.svg)](https://zenodo.org/badge/latestdoi/426956166)
 
